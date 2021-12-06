@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/url"
 	"strings"
 
@@ -71,7 +72,7 @@ func (s S3StoreBase) String() string {
 	return s.Location
 }
 
-// Close the S3 base store. NOP opertation but needed to implement the store interface.
+// Close the S3 base store. NOP operation but needed to implement the store interface.
 func (s S3StoreBase) Close() error { return nil }
 
 // NewS3Store creates a chunk store with S3 backing. The URL
@@ -102,6 +103,10 @@ retry:
 	defer obj.Close()
 
 	b, err := ioutil.ReadAll(obj)
+	opError := &net.OpError{}
+	if err != nil {
+		fmt.Printf("shit is %q %T\n", err, err)
+	}
 	if e, ok := err.(minio.ErrorResponse); ok {
 		switch e.Code {
 		case "NoSuchBucket":
@@ -110,6 +115,10 @@ retry:
 			err = ChunkMissing{ID: id}
 		default: // Without ListBucket perms in AWS, we get Permission Denied for a missing chunk, not 404
 			err = errors.Wrap(err, fmt.Sprintf("chunk %s could not be retrieved from s3 store", id))
+		}
+	} else if errors.As(err, &opError) {
+		if attempt < s.opt.ErrorRetry {
+			goto retry
 		}
 	}
 	if err != nil {
